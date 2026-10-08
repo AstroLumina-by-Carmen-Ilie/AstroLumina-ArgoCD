@@ -1,0 +1,11 @@
+---
+# Namespace hosting the ArgoCD control plane (server, repo-server,
+# application-controller, redis). Created ahead of the Helm release so the
+# install works even with `--create-namespace` omitted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    app.kubernetes.io/name: argocd
+    app.kubernetes.io/part-of: astrolumina-platform

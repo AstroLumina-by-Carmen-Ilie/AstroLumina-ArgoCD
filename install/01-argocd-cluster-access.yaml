@@ -1,0 +1,41 @@
+---
+# Explicit cluster-wide grant for the ArgoCD control plane.
+# The argo-cd Helm chart already ships equivalent ClusterRoleBindings, so this
+# object is idempotent with a chart install -- it exists so the "ArgoCD may
+# manage manifests anywhere in the cluster" decision is visible in git instead
+# of hidden inside chart defaults.
+# Subjects cover the default service-account names created by
+# `helm install argocd argo/argo-cd` (release name `argocd`). If the release
+# is ever renamed, update the subject names to match `<release>-server`, etc.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-cluster-admin
+  labels:
+    app.kubernetes.io/name: argocd
+    app.kubernetes.io/part-of: astrolumina-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  # Serves the UI/API and renders the repo state.
+  - kind: ServiceAccount
+    name: argocd-server
+    namespace: argocd
+  # Applies synced manifests to the cluster (needs write everywhere).
+  - kind: ServiceAccount
+    name: argocd-application-controller
+    namespace: argocd
+  # Clones the git repo and builds Kustomize/Helm sources.
+  - kind: ServiceAccount
+    name: argocd-repo-server
+    namespace: argocd
+  # Generates Applications from ApplicationSets (used by future per-env sets).
+  - kind: ServiceAccount
+    name: argocd-applicationset-controller
+    namespace: argocd
+  # Sends sync/health notifications.
+  - kind: ServiceAccount
+    name: argocd-notifications-controller
+    namespace: argocd
