@@ -8,10 +8,10 @@
 # rename is seamless (delete the old standalone Applications first, then
 # apply this file -- with manual sync nothing auto-applies in between).
 #
-# Staging/production do blue/green via `blueGreen.liveColor` plus
-# `imageTags.blue/green` in their values file -- a flip is a git commit, then
-# SYNC. Production upgrades are commits changing tags (a rollback is a
-# revert).
+# Staging/production do blue/green via the per-service `blueGreen.liveColors`
+# entries plus `imageTags.blue/green` in their values file -- a flip is a git
+# commit changing one service line, then SYNC. Production upgrades are commits
+# changing tags (a rollback is a revert).
 #
 # Sync is MANUAL on all three (no `automated` block on purpose): press SYNC
 # in the UI per change. `prune: true` deletes from the cluster objects
