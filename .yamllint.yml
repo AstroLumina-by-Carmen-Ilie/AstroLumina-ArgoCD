@@ -1,0 +1,7 @@
+# Yamllint config: relaxed style with a wider line limit for long
+# comment lines in the manifests.
+extends: relaxed
+
+rules:
+  line-length:
+    max: 220

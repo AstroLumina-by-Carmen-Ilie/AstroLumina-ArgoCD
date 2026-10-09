@@ -1,93 +1,68 @@
 ---
-# Development release of the astrolumina chart.
-# Manual sync: press SYNC in the UI per change (no `automated` block).
+# ApplicationSet generating the three per-env Helm releases
+# (astrolumina-helm-dev/staging/production) from one template plus a List
+# generator. ArgoCD stamps one Application per `elements` entry and runs
+# `helm template` with values.yaml plus the env file (later files win).
+# Adding a new env later means adding one list entry, not copying a whole
+# document. The stamped Applications keep the exact names used before, so the
+# rename is seamless (delete the old standalone Applications first, then
+# apply this file -- with manual sync nothing auto-applies in between).
+#
+# Staging/production do blue/green via `blueGreen.liveColor` plus
+# `imageTags.blue/green` in their values file -- a flip is a git commit, then
+# SYNC. Production upgrades are commits changing tags (a rollback is a
+# revert).
+#
+# Sync is MANUAL on all three (no `automated` block on purpose): press SYNC
+# in the UI per change. `prune: true` deletes from the cluster objects
+# removed from git. `CreateNamespace: true` creates the namespace if missing.
+#
 # PREREQUISITES before the first SYNC: the Doppler operator, the Traefik CRDs
 # (IngressRoute, Middleware -- shipped with RKE2), the ghcr image-pull secret
 # created imperatively, and placeholder secrets enabled or replaced
-# (`placeholderSecretsEnabled` in values-dev.yaml).
+# (`placeholderSecretsEnabled` in each values file).
 apiVersion: argoproj.io/v1alpha1
-kind: Application
+kind: ApplicationSet
 metadata:
-  name: astrolumina-helm-dev
+  name: astrolumina-helm
   namespace: argocd
   labels:
-    app.kubernetes.io/name: astrolumina-helm-dev
+    app.kubernetes.io/name: astrolumina-helm
     app.kubernetes.io/part-of: astrolumina-platform
 spec:
-  project: default
-  source:
-    repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Helm.git
-    targetRevision: HEAD
-    path: charts/astrolumina
-    helm:
-      # values.yaml first, env file second (later files win on conflict).
-      valueFiles:
-        - values.yaml
-        - values-dev.yaml
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: astrolumina-dev
-  syncPolicy:
-    prune: true
-    syncOptions:
-      - CreateNamespace=true
----
-# Staging release of the astrolumina chart (blue/green via
-# `blueGreen.liveColor` + `imageTags.blue/green` in values-staging.yaml).
-# Manual sync: press SYNC in the UI per change (no `automated` block).
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: astrolumina-helm-staging
-  namespace: argocd
-  labels:
-    app.kubernetes.io/name: astrolumina-helm-staging
-    app.kubernetes.io/part-of: astrolumina-platform
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Helm.git
-    targetRevision: HEAD
-    path: charts/astrolumina
-    helm:
-      # values.yaml first, env file second (later files win on conflict).
-      valueFiles:
-        - values.yaml
-        - values-staging.yaml
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: astrolumina-staging
-  syncPolicy:
-    prune: true
-    syncOptions:
-      - CreateNamespace=true
----
-# Production release of the astrolumina chart (TLS + dashboard auth, tags
-# pinned in values-production.yaml -- an upgrade is a commit changing a tag).
-# Manual sync: press SYNC in the UI per change (no `automated` block).
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: astrolumina-helm-production
-  namespace: argocd
-  labels:
-    app.kubernetes.io/name: astrolumina-helm-production
-    app.kubernetes.io/part-of: astrolumina-platform
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Helm.git
-    targetRevision: HEAD
-    path: charts/astrolumina
-    helm:
-      # values.yaml first, env file second (later files win on conflict).
-      valueFiles:
-        - values.yaml
-        - values-production.yaml
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: astrolumina-prod
-  syncPolicy:
-    prune: true
-    syncOptions:
-      - CreateNamespace=true
+  generators:
+    - list:
+        elements:
+          - env: dev
+            namespace: astrolumina-dev
+            valuesFile: values-dev.yaml
+          - env: staging
+            namespace: astrolumina-staging
+            valuesFile: values-staging.yaml
+          - env: production
+            namespace: astrolumina-prod
+            valuesFile: values-production.yaml
+  template:
+    metadata:
+      name: 'astrolumina-helm-{{env}}'
+      labels:
+        app.kubernetes.io/name: 'astrolumina-helm-{{env}}'
+        app.kubernetes.io/part-of: astrolumina-platform
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Helm.git
+        targetRevision: HEAD
+        path: charts/astrolumina
+        helm:
+          # values.yaml first, env file second (later files win on conflict).
+          valueFiles:
+            - values.yaml
+            - '{{valuesFile}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      syncPolicy:
+        prune: true
+        syncOptions:
+          - CreateNamespace=true
