@@ -107,12 +107,16 @@ export K8S_CP_CONN=$(doppler secrets get K8S_CP_CONN --plain --project astrolumi
 # per CP; the `||` skips it when `helm version` already answers):
 ssh "$K8S_CP_CONN" -- "helm version >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
 
-# Chart repo + pick a version to pin (never install unpinned in prod):
-ssh "$K8S_CP_CONN" -- "helm repo add argo https://argoproj.github.io/argo-helm && helm repo update"
-ssh "$K8S_CP_CONN" -- "helm search repo argo/argo-cd --versions | head -5"
-```
+# Chart repo (re-runnable: skips add when it already exists) + refresh:
+ssh "$K8S_CP_CONN" -- "helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true; helm repo update"
 
-Take the newest version from that list and put it in `CHART_VERSION` below.
+# Newest chart version, resolved automatically -- every install takes the
+# latest, no manual lookup. (Re-running later upgrades to whatever is newest
+# at that point; across major chart versions check the upstream upgrade notes
+# first -- CRDs sometimes need a manual refresh.)
+CHART_VERSION=$(ssh "$K8S_CP_CONN" -- "helm show chart argo/argo-cd | grep '^version:' | awk '{print \$2}'")
+echo "Installing argo-cd chart version: ${CHART_VERSION}"
+```
 Values (`~/argocd-values.yaml` on the CP — one file, two decisions):
 
 ```bash
@@ -131,7 +135,7 @@ EOF
 ```
 
 ```bash
-ssh "$K8S_CP_CONN" -- "helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace --version <CHART_VERSION> -f ~/argocd-values.yaml"
+ssh "$K8S_CP_CONN" -- "helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace --version ${CHART_VERSION} -f ~/argocd-values.yaml"
 
 # Wait for it.
 ssh "$K8S_CP_CONN" -- "kubectl rollout status deploy/argocd-server -n argocd --timeout=300s"
@@ -143,7 +147,18 @@ ssh "$K8S_CP_CONN" -- "kubectl rollout status deploy/argocd-server -n argocd --t
 
 ### First login
 
-The initial admin password is generated into a Secret (plaintext, base64):
+The throwaway initial password is replaced at install time by
+`install/set-argocd-admin-password.sh` (step 3 in the README): it reads the
+pre-hashed bcrypt value `ARGOCD_ADMIN_PASSWORD_HASH` (preferred) or
+`ARGOCD_ADMIN_PASSWORD` from Doppler
+(`astrolumina`/`prd`), validates and normalizes it, patches only the password
+keys of `argocd-secret`, deletes the initial-password secret, and restarts the
+server. Generate the hash with `htpasswd -nbB admin` and store it in Doppler
+(a verbatim `admin:$2y$...` line works too). Log in as `admin` with the
+plaintext password behind the hash. Re-run the script for rotation.
+
+Fallback (if the script was skipped): the generated password lives in a
+Secret (plaintext, base64):
 
 ```bash
 ssh "$K8S_CP_CONN" -- "kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d; echo"
