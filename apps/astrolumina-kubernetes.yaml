@@ -1,89 +1,67 @@
 ---
-# Development app: ArgoCD runs `kustomize build` on development/ (detected
-# automatically from the kustomization.yaml in that directory) and syncs the
-# result into astrolumina-dev.
-# Sync is MANUAL: nothing is applied until you press SYNC in the ArgoCD UI
-# (no `automated` block on purpose). `prune: true` deletes from the cluster
-# objects removed from git. `CreateNamespace: true` creates the namespace if
-# missing (the build also contains the Namespace object itself).
+# ApplicationSet generating the three per-env Kustomize Applications
+# (astrolumina-kubernetes-dev/staging/production) from one template plus a
+# List generator. ArgoCD stamps one Application per `elements` entry, so
+# adding a new env later means adding one list entry, not copying a whole
+# document. The stamped Applications keep the exact names used before, so the
+# rename is seamless (delete the old standalone Applications first, then
+# apply this file -- with manual sync nothing auto-applies in between).
+#
+# Each app: ArgoCD runs `kustomize build` on the env directory (detected
+# automatically from its kustomization.yaml) and syncs the result.
+# Staging/production carry the blue + green Deployments plus the
+# 53-live-services.yaml selectors -- a live flip is a git commit changing
+# those selectors, then SYNC. Production image upgrades are commits changing
+# tags in git (a rollback is a revert).
+#
+# Sync is MANUAL on all three (no `automated` block on purpose): press SYNC
+# in the UI per change. `prune: true` deletes from the cluster objects
+# removed from git. `CreateNamespace: true` creates the namespace if missing
+# (the build also contains the Namespace object itself).
 #
 # PREREQUISITES before the first SYNC: the Doppler operator (it resolves the
-# DopplerSecret CRs), the ghcr image-pull secret created imperatively, and
-# ARGOCD.md section 0 completed in the Kubernetes repo (placeholders out of
-# the live kustomizations, everything pushed) -- ArgoCD syncs exactly what is
-# committed, with no selective-apply step.
+# DopplerSecret CRs), the ghcr image-pull secret created imperatively, the
+# Traefik CRDs for staging/production (IngressRoute, Middleware -- shipped
+# with RKE2), and ARGOCD.md section 0 completed in the Kubernetes repo
+# (placeholders out of the live kustomizations, everything pushed) -- ArgoCD
+# syncs exactly what is committed, with no selective-apply step.
 apiVersion: argoproj.io/v1alpha1
-kind: Application
+kind: ApplicationSet
 metadata:
-  name: astrolumina-kubernetes-dev
+  name: astrolumina-kubernetes
   namespace: argocd
   labels:
-    app.kubernetes.io/name: astrolumina-kubernetes-dev
+    app.kubernetes.io/name: astrolumina-kubernetes
     app.kubernetes.io/part-of: astrolumina-platform
 spec:
-  project: default
-  source:
-    repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Kubernetes.git
-    targetRevision: HEAD
-    path: development
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: astrolumina-dev
-  syncPolicy:
-    prune: true
-    syncOptions:
-      - CreateNamespace=true
----
-# Staging app: `kustomize build` on staging/ (blue + green Deployments plus
-# the 53-live-services.yaml selectors pointing at the live color -- the flip
-# itself is a git commit changing those selectors, then SYNC).
-# Manual sync, same policy as dev. Needs the Traefik CRDs (IngressRoute,
-# Middleware -- shipped with RKE2) for the 51/52 routes to apply.
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: astrolumina-kubernetes-staging
-  namespace: argocd
-  labels:
-    app.kubernetes.io/name: astrolumina-kubernetes-staging
-    app.kubernetes.io/part-of: astrolumina-platform
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Kubernetes.git
-    targetRevision: HEAD
-    path: staging
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: astrolumina-staging
-  syncPolicy:
-    prune: true
-    syncOptions:
-      - CreateNamespace=true
----
-# Production app: `kustomize build` on production/ (TLS IngressRoutes,
-# dashboard auth, image tags pinned in git -- an upgrade is a commit changing
-# a tag, a rollback is a revert).
-# Manual sync, same policy as dev. Same prerequisites as staging (Doppler
-# operator, Traefik CRDs, ghcr secret, ARGOCD.md section 0 done).
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: astrolumina-kubernetes-production
-  namespace: argocd
-  labels:
-    app.kubernetes.io/name: astrolumina-kubernetes-production
-    app.kubernetes.io/part-of: astrolumina-platform
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Kubernetes.git
-    targetRevision: HEAD
-    path: production
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: astrolumina-prod
-  syncPolicy:
-    prune: true
-    syncOptions:
-      - CreateNamespace=true
+  generators:
+    - list:
+        elements:
+          - env: dev
+            path: development
+            namespace: astrolumina-dev
+          - env: staging
+            path: staging
+            namespace: astrolumina-staging
+          - env: production
+            path: production
+            namespace: astrolumina-prod
+  template:
+    metadata:
+      name: 'astrolumina-kubernetes-{{env}}'
+      labels:
+        app.kubernetes.io/name: 'astrolumina-kubernetes-{{env}}'
+        app.kubernetes.io/part-of: astrolumina-platform
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/AstroLumina-by-Carmen-Ilie/AstroLumina-Kubernetes.git
+        targetRevision: HEAD
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      syncPolicy:
+        prune: true
+        syncOptions:
+          - CreateNamespace=true
